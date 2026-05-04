@@ -37,7 +37,20 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
+    'rest_framework',
+    'django_zxcvbn_password_validator',
+    'custom_auth',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -47,7 +60,37 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'pwned_passwords_django.middleware.pwned_passwords_middleware',
 ]
+
+
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+]
+
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 12}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+    {'NAME': 'auth.validators.StrongPasswordValidator'},
+     {
+        'NAME': 'pwned_passwords_django.validators.PwnedPasswordsValidator',
+        'OPTIONS': {
+            'error_message': 'This password was found in a data breach. Please choose another.',
+            'help_message': 'Your password must not be one known to have been compromised in a breach.',
+        }
+    },
+    {
+        'NAME': 'django_zxcvbn_password_validator.ZxcvbnPasswordValidator',
+    },
+]
+
+PWNED_PASSWORDS = {
+    'API_TIMEOUT': 1.5,     # Default is 1.0s; sets how long to wait for HIBP
+    'PASSWORD_REGEX': r'PASS', # Regex to identify password fields in middleware
+}
 
 ROOT_URLCONF = 'auth_system.urls'
 
@@ -115,3 +158,16 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+AUTH_USER_MODEL = "custom_auth.User"
+
+
+
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+}
