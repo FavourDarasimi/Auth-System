@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_zxcvbn_password_validator',
     'custom_auth',
+    'axes'
 ]
 
 REST_FRAMEWORK = {
@@ -55,12 +56,14 @@ REST_FRAMEWORK = {
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+     'axes.middleware.AxesMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'pwned_passwords_django.middleware.pwned_passwords_middleware',
+   
 ]
 
 
@@ -74,7 +77,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 12}},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
-    {'NAME': 'auth.validators.StrongPasswordValidator'},
+    {'NAME': 'custom_auth.validators.StrongPasswordValidator'},
      {
         'NAME': 'pwned_passwords_django.validators.PwnedPasswordsValidator',
         'OPTIONS': {
@@ -126,21 +129,6 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
-]
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -172,4 +160,38 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+    }
+}
+
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+AXES_FAILURE_LIMIT = 5        # higher than your custom limit of 5
+AXES_LOCK_OUT_AT_FAILURE = True
+from datetime import timedelta
+
+AXES_COOLOFF_TIME = timedelta(minutes=5) 
+AXES_USERNAME_FORM_FIELD = "email"
+
+
+AUTHENTICATION_BACKENDS = [
+    # Axes must be at the top to intercept login attempts
+    'axes.backends.AxesStandaloneBackend',
+    
+    # This is the default backend you're currently using implicitly
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+# Encryption key (generate once)
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+FERNET_KEY = os.getenv("FERNET_KEY")
+# SMS provider
+SMS_PROVIDER = "console"  # or "twilio"

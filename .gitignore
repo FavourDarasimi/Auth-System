@@ -56,3 +56,5 @@ pylint-output.txt
 # Logs
 *.log
 
+.env
+

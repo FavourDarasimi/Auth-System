@@ -8,10 +8,22 @@ from .serializers import SignupSerializer
 from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils import timezone
+from django.contrib.auth import authenticate
+from .models import User
+from django.db import transaction
+from .models import  BackupCode, LoginEvent
+from .utils import (
+    generate_sms_otp,
+    get_client_ip,
+    verify_sms_otp,
+    decrypt,
+)
+import pyotp
 
 
 class SignupView(APIView):
     permission_classes = [AllowAny]
+    
 
     def post(self, request):
         # 1. First, check if the middleware flagged the password as pwned
@@ -61,7 +73,6 @@ class SignupView(APIView):
 
 
 
-
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
     
@@ -83,3 +94,157 @@ class VerifyEmailView(APIView):
         obj.save()
 
         return Response({"message": "Email verified"})
+    
+    
+
+
+
+# ---------------------------
+# LOGIN VIEW (Phase 1 + Step 5)
+# ---------------------------
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        ip = get_client_ip(request)
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+
+       
+        #  Authenticate
+        request.axes_username = email  # for Axes to log the attempt
+        user = authenticate(request, username=email, password=password)
+
+        if not user:
+            print("AUTH FAILED")
+            LoginEvent.objects.create(
+                email=email,
+                ip_address=ip,
+                user_agent=user_agent,
+                success=False
+            )
+            return Response({"detail": "Invalid credentials"}, status=401)
+
+        # MFA check
+        mfa = getattr(user, "mfaprofile", None)
+        if mfa and mfa.method != "none":
+            if mfa.method == "sms":
+                try:
+                    generate_sms_otp(user.id)
+                except Exception as e:
+                    print(f"SMS OTP ERROR: {e}")
+                    return Response({"detail": "Failed to send OTP"}, status=500)
+
+            return Response({
+                "mfa_required": True,
+                "user_id": user.id,
+                "method": mfa.method
+            })
+
+        # No MFA — issue tokens
+        return self._issue_tokens(user, ip, user_agent, mfa_used=False)
+
+    def _issue_tokens(self, user, ip, user_agent, mfa_used):
+        refresh = RefreshToken.for_user(user)
+
+        response = Response({
+            "access": str(refresh.access_token)
+        })
+
+        response.set_cookie(
+            key="refresh_token",
+            value=str(refresh),
+            httponly=True,
+            secure=True,
+            samesite="Strict"
+        )
+
+        LoginEvent.objects.create(
+            user=user,
+            email=user.email,
+            ip_address=ip,
+            user_agent=user_agent,
+            success=True,
+            mfa_used=mfa_used
+        )
+
+        return response
+# ---------------------------
+# MFA CHALLENGE VIEW (Phase 2)
+# ---------------------------
+class MFAChallengeView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        user_id = request.data.get("user_id")
+        method = request.data.get("method")
+        code = request.data.get("code")
+
+        ip = get_client_ip(request)
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(status=401)
+
+        mfa = user.mfaprofile
+
+        valid = False
+
+        # TOTP
+        if method == "totp":
+            secret = decrypt(mfa.totp_secret_encrypted)
+            totp = pyotp.TOTP(secret)
+            valid = totp.verify(code, valid_window=1)
+
+        # SMS
+        elif method == "sms":
+            valid = verify_sms_otp(user_id, code)
+
+        # Backup codes
+        elif method == "backup":
+            with transaction.atomic():
+                codes = BackupCode.objects.select_for_update().filter(
+                    user=user,
+                    used=False
+                )
+
+                for c in codes:
+                    if c.redeem(code):
+                        valid = True
+                        break
+
+        if not valid:
+            return Response({"detail": "Invalid code"}, status=401)
+
+        # Step 7: Issue tokens
+        refresh = RefreshToken.for_user(user)
+
+        response = Response({
+            "access": str(refresh.access_token)
+        })
+
+        response.set_cookie(
+            key="refresh_token",
+            value=str(refresh),
+            httponly=True,
+            secure=True,
+            samesite="Strict"
+        )
+
+        LoginEvent.objects.create(
+            user=user,
+            email=user.email,
+            ip_address=ip,
+            user_agent=user_agent,
+            success=True,
+            mfa_used=True
+        )
+
+
+        return response    
+    
+    
+    
