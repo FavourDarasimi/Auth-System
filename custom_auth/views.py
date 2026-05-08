@@ -17,8 +17,26 @@ from .utils import (
     get_client_ip,
     verify_sms_otp,
     decrypt,
+    encrypt
 )
 import pyotp
+import requests
+import secrets
+from django.conf import settings
+from django.contrib.auth import login
+from .models import User, SocialAccount
+from .serializers import OAuthSerializer
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # ← top of settings.py, before any os.getenv() calls
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
+
 
 
 class SignupView(APIView):
@@ -26,7 +44,7 @@ class SignupView(APIView):
     
 
     def post(self, request):
-        # 1. First, check if the middleware flagged the password as pwned
+        # check if the middleware flagged the password as pwned
         # This list will contain the key names (e.g., 'password') if found in a breach
         if hasattr(request, 'pwned_passwords') and request.pwned_passwords:
             return Response({
@@ -36,7 +54,7 @@ class SignupView(APIView):
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Proceed with standard serialization and saving
+        # Proceed with standard serialization and saving
         serializer = SignupSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -97,11 +115,6 @@ class VerifyEmailView(APIView):
     
     
 
-
-
-# ---------------------------
-# LOGIN VIEW (Phase 1 + Step 5)
-# ---------------------------
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -171,9 +184,8 @@ class LoginView(APIView):
         )
 
         return response
-# ---------------------------
-# MFA CHALLENGE VIEW (Phase 2)
-# ---------------------------
+
+
 class MFAChallengeView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -219,7 +231,7 @@ class MFAChallengeView(APIView):
         if not valid:
             return Response({"detail": "Invalid code"}, status=401)
 
-        # Step 7: Issue tokens
+        #Issue tokens
         refresh = RefreshToken.for_user(user)
 
         response = Response({
@@ -245,6 +257,201 @@ class MFAChallengeView(APIView):
 
 
         return response    
-    
-    
-    
+
+
+class GoogleLoginView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        serializer = OAuthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        code = serializer.validated_data["code"]
+
+        token_url = "https://oauth2.googleapis.com/token"
+
+        data = {
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": "http://localhost:5500/callback.html",
+            "grant_type": "authorization_code",
+        }
+
+        token_response = requests.post(token_url, data=data)
+
+        if token_response.status_code != 200:
+            return Response(
+                {"detail": "Google token exchange failed"},
+                status=400
+            )
+
+        token_json = token_response.json()
+
+        access_token = token_json.get("access_token")
+
+        userinfo_response = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            }
+        )
+
+        user_data = userinfo_response.json()
+
+        email = user_data["email"]
+        provider_user_id = user_data["id"]
+
+        user = User.objects.filter(email=email).first()
+
+        if not user:
+            user = User.objects.create(
+                email=email,
+                is_verified=True
+            )
+
+            user.set_unusable_password()
+            user.save()
+
+        SocialAccount.objects.get_or_create(
+            provider="google",
+            provider_user_id=provider_user_id,
+            defaults={
+                "user": user,
+                "extra_data": user_data
+            }
+        )
+
+        refresh = RefreshToken.for_user(user)
+
+        response = Response({
+            "access": str(refresh.access_token),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+            }
+        })
+
+        response.set_cookie(
+            key="refresh_token",
+            value=str(refresh),
+            httponly=True,
+            secure=True,
+            samesite="Strict"
+        )
+
+        return response
+
+
+# -----------------------------------
+# GITHUB LOGIN
+# -----------------------------------
+
+class GitHubLoginView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        serializer = OAuthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        code = serializer.validated_data["code"]
+
+        token_response = requests.post(
+            "https://github.com/login/oauth/access_token",
+            headers={
+                "Accept": "application/json"
+            },
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": code,
+            }
+        )
+
+        if token_response.status_code != 200:
+            return Response(
+                {"detail": "GitHub token exchange failed"},
+                status=400
+            )
+
+        token_json = token_response.json()
+
+        access_token = token_json.get("access_token")
+
+        user_response = requests.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            }
+        )
+
+        user_data = user_response.json()
+
+        email_response = requests.get(
+            "https://api.github.com/user/emails",
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            }
+        )
+
+        emails = email_response.json()
+
+        primary_email = None
+
+        for e in emails:
+            if e.get("primary"):
+                primary_email = e["email"]
+                break
+
+        if not primary_email:
+            return Response(
+                {"detail": "No primary email found"},
+                status=400
+            )
+
+        provider_user_id = str(user_data["id"])
+
+        user = User.objects.filter(email=primary_email).first()
+
+        if not user:
+            user = User.objects.create(
+                email=primary_email,
+                is_verified=True
+
+            )
+
+            user.set_unusable_password()
+            user.save()
+
+        SocialAccount.objects.get_or_create(
+            provider="github",
+            provider_user_id=encrypt(provider_user_id),
+            defaults={
+                "user": user,
+                "extra_data": user_data
+            }
+        )
+
+        refresh = RefreshToken.for_user(user)
+
+        response = Response({
+            "access": str(refresh.access_token),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+            }
+        })
+
+        response.set_cookie(
+            key="refresh_token",
+            value=str(refresh),
+            httponly=True,
+            secure=True,
+            samesite="Strict"
+        )
+
+        return response

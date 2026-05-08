@@ -30,6 +30,9 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
+
+
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -41,8 +44,29 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_zxcvbn_password_validator',
     'custom_auth',
-    'axes'
+    'axes',
+    
+     "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.github",
+
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
+    
+    "corsheaders",
 ]
+
+
+REST_AUTH = {
+    "USE_JWT": True,
+    "TOKEN_MODEL": None,      # ← this is the key line — disables TokenModel lookup entirely
+}
+
+
+SITE_ID = 1
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -54,6 +78,7 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
      'axes.middleware.AxesMiddleware',
@@ -63,7 +88,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'pwned_passwords_django.middleware.pwned_passwords_middleware',
-   
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 
@@ -184,6 +209,13 @@ AUTHENTICATION_BACKENDS = [
     
     # This is the default backend you're currently using implicitly
     'django.contrib.auth.backends.ModelBackend',
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+
+
+CORS_ALLOWED_ORIGINS = [
+   'http://localhost:5500'
 ]
 
 # Encryption key (generate once)
@@ -195,3 +227,23 @@ load_dotenv()
 FERNET_KEY = os.getenv("FERNET_KEY")
 # SMS provider
 SMS_PROVIDER = "console"  # or "twilio"
+
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": [
+            "profile",
+            "email",
+        ],
+        "AUTH_PARAMS": {
+            "access_type": "online",
+        },
+    },
+
+    "github": {
+        "SCOPE": [
+            "user",
+            "user:email",
+        ],
+    },
+}

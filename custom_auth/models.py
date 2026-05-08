@@ -33,8 +33,8 @@ class User(AbstractBaseUser,PermissionsMixin):
     
     objects = UserManager()
 
-    USERNAME_FIELD  = 'email'       # use email to login
-    REQUIRED_FIELDS = []            # no extra required fields
+    USERNAME_FIELD  = 'email'       
+    REQUIRED_FIELDS = []           
 
     def __str__(self):
         return self.email
@@ -107,3 +107,30 @@ class LoginEvent(models.Model):
     
     def __str__(self):
         return f'{self.email} Event'
+    
+class SocialAccount(models.Model):
+
+    PROVIDERS = (
+        ("google", "Google"),
+        ("github", "GitHub"),
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="social_accounts"
+    )
+
+    provider = models.CharField(max_length=50, choices=PROVIDERS)
+
+    provider_user_id = models.CharField(max_length=255)
+
+    extra_data = models.JSONField(default=dict)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("provider", "provider_user_id")
+
+    def __str__(self):
+        return f"{self.user.email} - {self.provider}"    

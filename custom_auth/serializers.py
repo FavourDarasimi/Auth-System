@@ -16,3 +16,7 @@ class SignupSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = User.objects.create_user(**validated_data,is_verified=False)
         return user
+    
+class OAuthSerializer(serializers.Serializer):
+
+    code = serializers.CharField()    
