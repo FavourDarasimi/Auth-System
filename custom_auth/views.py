@@ -4,12 +4,12 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from custom_auth.models import EmailVerificationToken
-from .serializers import SignupSerializer
+from .serializers import SignupSerializer,OAuthSerializer, LoginSerializer,MFAChallengeSerializer
 from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import authenticate
-from .models import User
+from .models import User,SocialAccount
 from django.db import transaction
 from .models import  BackupCode, LoginEvent
 from .utils import (
@@ -24,8 +24,6 @@ import requests
 import secrets
 from django.conf import settings
 from django.contrib.auth import login
-from .models import User, SocialAccount
-from .serializers import OAuthSerializer
 
 from dotenv import load_dotenv
 import os
@@ -119,8 +117,10 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email")
-        password = request.data.get("password")
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
 
         ip = get_client_ip(request)
         user_agent = request.META.get("HTTP_USER_AGENT", "")
@@ -189,9 +189,11 @@ class LoginView(APIView):
 class MFAChallengeView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
-        user_id = request.data.get("user_id")
-        method = request.data.get("method")
-        code = request.data.get("code")
+        serializer = MFAChallengeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_id = serializer.validated_data['user_id']
+        method = serializer.validated_data['method']
+        code = serializer.validated_data['code']
 
         ip = get_client_ip(request)
         user_agent = request.META.get("HTTP_USER_AGENT", "")
