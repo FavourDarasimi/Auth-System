@@ -13,7 +13,7 @@ from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import authenticate
-from .models import RefreshSession, User,SocialAccount
+from .models import MFAProfile, RefreshSession, User,SocialAccount
 from django.db import transaction
 from .models import  BackupCode, LoginEvent
 from .utils import (
@@ -212,30 +212,7 @@ class LoginView(APIView):
         
         return response
         
-        # refresh = RefreshToken.for_user(user)
-
-        # response = Response({
-        #     "access": str(refresh.access_token)
-        # })
-
-        # response.set_cookie(
-        #     key="refresh_token",
-        #     value=str(refresh),
-        #     httponly=True,
-        #     secure=True,
-        #     samesite="Strict"
-        # )
-
-        # LoginEvent.objects.create(
-        #     user=user,
-        #     email=user.email,
-        #     ip_address=ip,
-        #     user_agent=user_agent,
-        #     success=True,
-        #     mfa_used=mfa_used
-        # )
-
-        # return response
+    
         
 class RefreshTokenView(APIView):
 
@@ -345,6 +322,27 @@ class RefreshTokenView(APIView):
 
         return response        
 
+class ChangeMFAChallengeStatusView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self,request):
+        method = request.data.get('method')
+        if method not in ["totp","sms","none"]:
+            return Response({
+                "status":"error",
+                "message":"Method not in available methods./n Available Method: sms,totp,none"
+            },status=400)
+        mfa_profile,created = MFAProfile.objects.get_or_create(user=request.user)
+        mfa_profile.method = method
+        mfa_profile.save()
+        message=""
+        if created:
+            message = "MFAProfile Added"
+        else:
+            message = "MFAProfile Updated"   
+        return Response({
+            'message':message
+        })
 
 class MFAChallengeView(APIView):
     permission_classes = [AllowAny]
