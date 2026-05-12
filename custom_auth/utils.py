@@ -2,6 +2,10 @@ import secrets
 from django.core.cache import cache
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.contrib.auth.hashers import (
+    make_password,
+    check_password
+)
 
 fernet = Fernet(settings.FERNET_KEY)
 
@@ -39,3 +43,23 @@ def encrypt(value):
 
 def decrypt(value):
     return fernet.decrypt(value.encode()).decode()
+
+def hash_token(token):
+    return make_password(token)
+
+
+def verify_token(raw_token, hashed_token):
+    return check_password(raw_token, hashed_token)
+
+# ACCESS TOKEN BLACKLIST
+
+def blacklist_access_token(jti, exp_seconds):
+    cache.set(
+        f"blacklist:{jti}",
+        "true",
+        timeout=exp_seconds
+    )
+
+
+def is_blacklisted(jti):
+    return cache.get(f"blacklist:{jti}") is not None

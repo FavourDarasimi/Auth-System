@@ -1,23 +1,29 @@
+from datetime import timedelta
+import uuid
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from custom_auth.models import EmailVerificationToken
+from custom_auth.tokens import create_access_token
 from .serializers import SignupSerializer,OAuthSerializer, LoginSerializer,MFAChallengeSerializer
 from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import authenticate
-from .models import User,SocialAccount
+from .models import RefreshSession, User,SocialAccount
 from django.db import transaction
 from .models import  BackupCode, LoginEvent
 from .utils import (
     generate_sms_otp,
     get_client_ip,
+    hash_token,
     verify_sms_otp,
     decrypt,
-    encrypt
+    encrypt,
+    verify_token
 )
 import pyotp
 import requests
@@ -160,20 +166,28 @@ class LoginView(APIView):
         return self._issue_tokens(user, ip, user_agent, mfa_used=False)
 
     def _issue_tokens(self, user, ip, user_agent, mfa_used):
-        refresh = RefreshToken.for_user(user)
+        
+        refresh_token = RefreshToken.for_user(user)
 
-        response = Response({
-            "access": str(refresh.access_token)
-        })
+        # HASH TOKEN
+        hashed = hash_token(str(refresh_token))
 
-        response.set_cookie(
-            key="refresh_token",
-            value=str(refresh),
-            httponly=True,
-            secure=True,
-            samesite="Strict"
+        family_id = uuid.uuid4()
+
+        # STORE SESSION
+        session = RefreshSession.objects.create(
+            user=user,
+            token_hash=hashed,
+            expires_at=timezone.now() + timedelta(days=7),
+            family_id=family_id,
+            user_agent=user_agent,
+            ip_address=ip
         )
 
+        # CREATE ACCESS TOKEN
+        token = refresh_token.access_token
+        access_token = create_access_token(user,session.id,token)
+        
         LoginEvent.objects.create(
             user=user,
             email=user.email,
@@ -183,7 +197,153 @@ class LoginView(APIView):
             mfa_used=mfa_used
         )
 
+        response = Response({
+            "access": access_token
+        })
+        
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            max_age=604800
+        )
+        
         return response
+        
+        # refresh = RefreshToken.for_user(user)
+
+        # response = Response({
+        #     "access": str(refresh.access_token)
+        # })
+
+        # response.set_cookie(
+        #     key="refresh_token",
+        #     value=str(refresh),
+        #     httponly=True,
+        #     secure=True,
+        #     samesite="Strict"
+        # )
+
+        # LoginEvent.objects.create(
+        #     user=user,
+        #     email=user.email,
+        #     ip_address=ip,
+        #     user_agent=user_agent,
+        #     success=True,
+        #     mfa_used=mfa_used
+        # )
+
+        # return response
+        
+class RefreshTokenView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        refresh_token = request.COOKIES.get("refresh_token")
+
+        if not refresh_token:
+            return Response(
+                {"detail": "No refresh token"},
+                status=401
+            )
+
+        sessions = RefreshSession.objects.filter(
+            revoked=False
+        )
+
+        matched_session = None
+
+        # FIND MATCHING HASH
+        for session in sessions:
+
+            if verify_token(
+                refresh_token,
+                session.token_hash
+            ):
+                matched_session = session
+                break
+
+        if not matched_session:
+            return Response(
+                {"detail": "Invalid refresh token"},
+                status=401
+            )
+
+        # EXPIRED
+        if matched_session.expires_at < timezone.now():
+
+            matched_session.revoked = True
+            matched_session.save()
+
+            return Response(
+                {"detail": "Refresh token expired"},
+                status=401
+            )
+
+        # REUSE DETECTION
+        if matched_session.replaced_by:
+
+            # REVOKE ENTIRE FAMILY
+            RefreshSession.objects.filter(
+                family_id=matched_session.family_id
+            ).update(revoked=True)
+
+            return Response(
+                {"detail": "Refresh token reuse detected"},
+                status=401
+            )
+
+        # ROTATE TOKEN
+
+        matched_session.revoked = True
+        matched_session.save()
+
+        # CREATE NEW TOKEN
+        new_refresh_token =  RefreshToken.for_user(matched_session.user)
+
+        new_hash = hash_token(str(new_refresh_token))
+
+        # CREATE NEW SESSION
+        new_session = RefreshSession.objects.create(
+            user=matched_session.user,
+            token_hash=new_hash,
+            expires_at=timezone.now() + timedelta(days=7),
+            family_id=matched_session.family_id,
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            ip_address=request.META.get("REMOTE_ADDR")
+        )
+
+        # LINK TOKENS
+        matched_session.replaced_by = new_session
+        matched_session.save()
+
+        # CREATE NEW ACCESS TOKEN
+        token = new_refresh_token.access_token
+        access_token = create_access_token(
+            user=matched_session.user,
+            session_id=new_session.id,
+            token=token
+        )
+
+        response = Response({
+            "access": access_token
+        })
+
+        # NEW COOKIE
+        response.set_cookie(
+            key="refresh_token",
+            value=new_refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            max_age=604800
+        )
+
+        return response        
 
 
 class MFAChallengeView(APIView):

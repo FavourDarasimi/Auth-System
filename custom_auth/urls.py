@@ -1,10 +1,10 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import GitHubLoginView, GoogleLoginView, SignupView,VerifyEmailView,LoginView, MFAChallengeView,AddManagerView,AddProductView
+from .views import GitHubLoginView, GoogleLoginView, SignupView,VerifyEmailView,LoginView, MFAChallengeView,AddManagerView,AddProductView,RefreshTokenView
 
 urlpatterns = [
     path('signup/',SignupView.as_view(),name='signup'),
-    path('token/refresh/',TokenRefreshView.as_view(),name='token_refresh'),
+    path('token/refresh/',RefreshTokenView.as_view(),name='token_refresh'),
     path('verify-email/<str:token>/', VerifyEmailView.as_view(), name='verify-email'),
     path("login/", LoginView.as_view()),
     path("mfa/challenge/", MFAChallengeView.as_view()),

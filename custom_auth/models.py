@@ -142,3 +142,43 @@ class SocialAccount(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.provider}"    
+    
+class RefreshSession(models.Model):
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE
+    )
+
+    token_hash = models.CharField(max_length=255)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    expires_at = models.DateTimeField()
+
+    revoked = models.BooleanField(default=False)
+
+    replaced_by = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+
+    family_id = models.UUIDField(default=uuid.uuid4)
+
+    user_agent = models.TextField(blank=True)
+
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True
+    )
+
+    def __str__(self):
+        return f"{self.user.email} - {self.id}"    
