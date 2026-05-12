@@ -24,8 +24,16 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
     
 class User(AbstractBaseUser,PermissionsMixin):
+    ROLE_CHOICES = (
+    ("admin", "Admin"),
+    ("manager", "Manager"),
+    ("customer", "Customer"),
+    )
+
+   
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
+    role = models.CharField(max_length=20,choices=ROLE_CHOICES,default="customer")
     is_verified = models.BooleanField(default=False)
     is_active  = models.BooleanField(default=True)
     is_staff   = models.BooleanField(default=False)

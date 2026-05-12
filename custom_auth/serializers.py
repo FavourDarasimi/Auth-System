@@ -17,11 +17,10 @@ class SignupSerializer(serializers.ModelSerializer):
         user = User.objects.create_user(**validated_data,is_verified=False)
         return user
     
-class LoginSerializer(serializers.ModelSerializer):
-    password  = serializers.CharField(write_only=True, validators=[validate_password])
-    class Meta:
-        model = User
-        fields = [ 'email', 'password']    
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password  = serializers.CharField(write_only=True)
+    
         
 class MFAChallengeSerializer(serializers.Serializer):
     METHOD_CHOICES = (

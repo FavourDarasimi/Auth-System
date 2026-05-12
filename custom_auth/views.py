@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from custom_auth.models import EmailVerificationToken
 from .serializers import SignupSerializer,OAuthSerializer, LoginSerializer,MFAChallengeSerializer
@@ -24,7 +24,7 @@ import requests
 import secrets
 from django.conf import settings
 from django.contrib.auth import login
-
+from .permissions import IsAdmin, IsManager,IsCustomer
 from dotenv import load_dotenv
 import os
 
@@ -128,7 +128,7 @@ class LoginView(APIView):
        
         #  Authenticate
         request.axes_username = email  # for Axes to log the attempt
-        user = authenticate(request, username=email, password=password)
+        user = authenticate(request, email=email, password=password)
 
         if not user:
             print("AUTH FAILED")
@@ -457,3 +457,27 @@ class GitHubLoginView(APIView):
         )
 
         return response
+    
+    
+class AddProductView(APIView):
+    permission_classes = [IsManager,IsAuthenticated]    
+    
+    def get(self,request):
+        return Response({
+            'message':'Manager added products',
+            'email':request.user.email,
+            'role':request.user.role        
+        })
+
+class AddManagerView(APIView):
+    permission_classes = [IsAdmin,IsAuthenticated]    
+    
+    def get(self,request):
+        return Response({
+            'message':'Admin added Manager',
+            'email':request.user.email,
+            'role':request.user.role        
+        })
+
+
+              

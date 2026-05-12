@@ -42,11 +42,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     
     'rest_framework',
+    "rest_framework_simplejwt.token_blacklist",
     'django_zxcvbn_password_validator',
     'custom_auth',
     'axes',
     
-     "allauth",
+    "allauth",
     "allauth.account",
     "allauth.socialaccount",
 
@@ -179,10 +180,11 @@ AUTH_USER_MODEL = "custom_auth.User"
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 CACHES = {
