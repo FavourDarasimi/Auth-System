@@ -6,17 +6,18 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
-from custom_auth.models import EmailVerificationToken
-from custom_auth.tokens import create_access_token
-from .serializers import SignupSerializer,OAuthSerializer, LoginSerializer,MFAChallengeSerializer
+from .tokens import create_access_token
+from .serializers import ForgotPasswordSerializer, MFAProfileSerializer, ResetPasswordSerializer, SignupSerializer,OAuthSerializer, LoginSerializer,MFAChallengeSerializer
 from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import authenticate
-from .models import MFAProfile, RefreshSession, User,SocialAccount
+from .models import MFAProfile, PasswordResetToken, RefreshSession,SocialAccount,EmailVerificationToken
 from django.db import transaction
 from .models import  BackupCode, LoginEvent
 from .utils import (
+    blacklist_access_token,
+    generate_reset_token,
     generate_sms_otp,
     get_client_ip,
     hash_token,
@@ -25,6 +26,7 @@ from .utils import (
     encrypt,
     verify_token
 )
+from django.contrib.auth import get_user_model
 import pyotp
 import requests
 import secrets
@@ -41,7 +43,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 
-
+User = get_user_model()
 
 class SignupView(APIView):
     permission_classes = [AllowAny]
@@ -326,12 +328,10 @@ class ChangeMFAChallengeStatusView(APIView):
     permission_classes = [AllowAny]
     
     def post(self,request):
-        method = request.data.get('method')
-        if method not in ["totp","sms","none"]:
-            return Response({
-                "status":"error",
-                "message":"Method not in available methods./n Available Method: sms,totp,none"
-            },status=400)
+        # method = request.data.get('method')
+        serializer = MFAProfileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        method = serializer.validated_data['method']
         mfa_profile,created = MFAProfile.objects.get_or_create(user=request.user)
         mfa_profile.method = method
         mfa_profile.save()
@@ -616,26 +616,203 @@ class GitHubLoginView(APIView):
 
         return response
     
-    
-class AddProductView(APIView):
-    permission_classes = [IsManager,IsAuthenticated]    
-    
-    def get(self,request):
-        return Response({
-            'message':'Manager added products',
-            'email':request.user.email,
-            'role':request.user.role        
+
+class ForgotPasswordView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        serializer = ForgotPasswordSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        user = User.objects.filter(
+            email=email
+        ).first()
+
+        
+        generic_response = {
+            "message":
+            "If this email exists, a password reset link has been sent."
+        }
+
+        if not user:
+            return Response(generic_response)
+
+        PasswordResetToken.objects.filter(
+            user=user,
+            used=False
+        ).update(
+            used=True,
+            used_at=timezone.now()
+        )
+
+        # Generate raw token
+        raw_token = generate_reset_token()
+
+        # Hash token before saving
+        hashed_token = hash_token(raw_token)
+
+        # Save reset token
+        PasswordResetToken.objects.create(
+            user=user,
+            token_hash=hashed_token,
+            expires_at=timezone.now() + timedelta(minutes=15)
+        )
+
+        # Frontend reset URL
+        reset_link = (
+            f"http://localhost:3000/reset-password"
+            f"?token={raw_token}"
+        )
+
+        # Send email
+        send_mail(
+            subject="Reset Your Password",
+            message=(
+                "You requested a password reset.\n\n"
+                f"Reset Link:\n{reset_link}\n\n"
+                "This link expires in 15 minutes."
+            ),
+            from_email="noreply@yourapp.com",
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+        return Response(generic_response)
+      
+class ResetPasswordView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        serializer = ResetPasswordSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        raw_token = serializer.validated_data["token"]
+        new_password = serializer.validated_data["password"]
+
+        matched_token = None
+
+        # Get unused tokens only
+        reset_tokens = PasswordResetToken.objects.filter(
+            used=False
+        ).select_related("user")
+
+        # Find matching token
+        for token_obj in reset_tokens:
+
+            if token_obj.verify(raw_token):
+                matched_token = token_obj
+                break
+
+        # Invalid token
+        if not matched_token:
+            return Response(
+                {"detail": "Invalid token"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Expired token
+        if matched_token.is_expired():
+
+            matched_token.mark_used()
+
+            return Response(
+                {"detail": "Token expired"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = matched_token.user
+
+        with transaction.atomic():
+
+            # Change password
+            user.set_password(new_password)
+
+            user.save()
+
+            # Mark token used
+            matched_token.mark_used()
+
+            # Revoke ALL refresh sessions
+            RefreshSession.objects.filter(
+                user=user,
+                revoked=False
+            ).update(revoked=True)
+
+        # Send security email
+        send_mail(
+            subject="Password Changed Successfully",
+            message=(
+                "Your password was changed successfully.\n\n"
+                "If this was not you, contact support immediately."
+            ),
+            from_email="noreply@yourapp.com",
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+
+        response = Response({
+            "message": "Password reset successful"
         })
 
-class AddManagerView(APIView):
-    permission_classes = [IsAdmin,IsAuthenticated]    
+        # Delete refresh cookie
+        response.delete_cookie("refresh_token")
+
+        return response   
     
-    def get(self,request):
-        return Response({
-            'message':'Admin added Manager',
-            'email':request.user.email,
-            'role':request.user.role        
+class LogoutView(APIView):
+
+    def post(self, request):
+
+        token = request.auth
+
+        if token:
+
+            jti = token.get("jti")
+
+            exp = token.get("exp")
+
+            from time import time
+
+            remaining_seconds = exp - int(time())
+
+            blacklist_access_token(
+                jti,
+                remaining_seconds
+            )
+
+        refresh_token = request.COOKIES.get("refresh_token")
+
+        if refresh_token:
+
+            sessions = RefreshSession.objects.filter(
+                revoked=False
+            )
+
+            for session in sessions:
+
+                if verify_token(
+                    refresh_token,
+                    session.token_hash
+                ):
+                    session.revoked = True
+                    session.save()
+
+        response = Response({
+            "detail": "Logged out"
         })
 
+        response.delete_cookie("refresh_token")
 
-              
+        return response               

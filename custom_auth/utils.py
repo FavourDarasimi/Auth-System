@@ -44,9 +44,11 @@ def encrypt(value):
 def decrypt(value):
     return fernet.decrypt(value.encode()).decode()
 
+def generate_reset_token():
+    return secrets.token_urlsafe(64)
+
 def hash_token(token):
     return make_password(token)
-
 
 def verify_token(raw_token, hashed_token):
     return check_password(raw_token, hashed_token)

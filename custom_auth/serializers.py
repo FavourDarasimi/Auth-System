@@ -20,7 +20,14 @@ class SignupSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password  = serializers.CharField(write_only=True)
-    
+   
+class MFAProfileSerializer(serializers.Serializer):
+    METHOD_CHOICES = (
+        ("none", "None"),
+        ("totp", "TOTP"),
+        ("sms", "SMS"),
+    )
+    method = serializers.ChoiceField(choices=METHOD_CHOICES)     
         
 class MFAChallengeSerializer(serializers.Serializer):
     METHOD_CHOICES = (
@@ -35,5 +42,15 @@ class MFAChallengeSerializer(serializers.Serializer):
 class OAuthSerializer(serializers.Serializer):
 
     code = serializers.CharField()   
+   
     
-     
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ResetPasswordSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value     

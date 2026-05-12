@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import GitHubLoginView, GoogleLoginView, SignupView,VerifyEmailView,LoginView, MFAChallengeView,ChangeMFAChallengeStatusView,RefreshTokenView
+from .views import ForgotPasswordView, GitHubLoginView, GoogleLoginView, LogoutView, ResetPasswordView, SignupView,VerifyEmailView,LoginView, MFAChallengeView,ChangeMFAChallengeStatusView,RefreshTokenView
 
 urlpatterns = [
     path('signup/',SignupView.as_view(),name='signup'),
@@ -10,7 +10,10 @@ urlpatterns = [
     path("mfa/challenge/", MFAChallengeView.as_view()),
     path("google/",GoogleLoginView.as_view(),name="google-login"),
     path("github/",GitHubLoginView.as_view(),name="github-login"),
-    path("add/mfa-profile/",ChangeMFAChallengeStatusView.as_view(),name="add-product"),
+    path("add/mfa-profile/",ChangeMFAChallengeStatusView.as_view(),name="add-mfa-profile"),
+    path("forgot-password/",ForgotPasswordView.as_view(),name="forgot-password"),
+    path("reset-password/",ResetPasswordView.as_view(),name="reset-password"),
+    path("logout/",LogoutView.as_view()),
 ]
 
 
